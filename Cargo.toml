@@ -1,0 +1,3 @@
+[workspace]
+members = ["kslang", "kslangc"]
+resolver = "1"

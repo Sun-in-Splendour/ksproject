@@ -1,0 +1,17 @@
+[package]
+name = "kslang"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[build-dependencies]
+cbindgen = "*"
+
+[dependencies]
+anyhow = "1.0.97"
+logos = "0.15.0"
+serde = { version = "1.0.219", features = ["derive"] }
+
