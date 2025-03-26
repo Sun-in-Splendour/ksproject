@@ -1,5 +1,5 @@
 use clap::{Command, arg};
-use kslang::lexer::token::{Token, Tokenizer};
+use kslang::compiler::token::{Token, Tokenizer};
 use std::io::{BufWriter, Read, Write};
 
 pub fn command() -> Command {

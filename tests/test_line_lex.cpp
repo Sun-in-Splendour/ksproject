@@ -1,160 +1,69 @@
-#include <cstring>
+#include "ksc_lexer.h"
 #include <iostream>
 #include <string>
 
-#include "kslex.h"
-
-void print_keyword(KSIndexType i) {
-    switch (i) {
-    case KS_KEYWORD_DEF:
-        std::cout << "`def`";
-        break;
-    case KS_KEYWORD_ELSE:
-        std::cout << "`else`";
-        break;
-    case KS_KEYWORD_EXTERN:
-        std::cout << "`extern`";
-        break;
-    case KS_KEYWORD_FOR:
-        std::cout << "`for`";
-        break;
-    case KS_KEYWORD_IF:
-        std::cout << "`if`";
-        break;
-    case KS_KEYWORD_THEN:
-        std::cout << "`then`";
-        break;
-    }
-}
-
-void print_operator(KSIndexType i) {
-    switch (i) {
-    case KS_OPERATOR_ASSIGN:
-        std::cout << "`=`";
-        break;
-    case KS_OPERATOR_EQ:
-        std::cout << "`==`";
-        break;
-    case KS_OPERATOR_NE:
-        std::cout << "`!=`";
-        break;
-    case KS_OPERATOR_GT:
-        std::cout << "`>`";
-        break;
-    case KS_OPERATOR_GE:
-        std::cout << "`>=`";
-        break;
-    case KS_OPERATOR_LT:
-        std::cout << "`<`";
-        break;
-    case KS_OPERATOR_LE:
-        std::cout << "`<=`";
-        break;
-    case KS_OPERATOR_ADD:
-        std::cout << "`+`";
-        break;
-    case KS_OPERATOR_SUB:
-        std::cout << "`-`";
-        break;
-    case KS_OPERATOR_MUL:
-        std::cout << "`*`";
-        break;
-    case KS_OPERATOR_DIV:
-        std::cout << "`/`";
-        break;
-    case KS_OPERATOR_MOD:
-        std::cout << "`%`";
-        break;
-    }
-}
-
-void print_punctuator(KSIndexType i) {
-    switch (i) {
-    case KS_PUNCTUATOR_OPEN_PAREN:
-        std::cout << "`(`";
-        break;
-    case KS_PUNCTUATOR_CLOSE_PAREN:
-        std::cout << "`)`";
-        break;
-    case KS_PUNCTUATOR_SEMICOLON:
-        std::cout << "`;`";
-        break;
-    }
-}
-
-void print_ident(KSStrType bytes, KSIndexType index, KSIndexType len) {
-    if (index >= len) {
-        std::cout << "<Error>";
-    }
-
-    std::string s;
-    size_t p = index;
-    while (bytes[p] != '\0' && p < len) {
-        s.push_back((char)bytes[p]);
-        p++;
-    }
-    std::cout << "`" << s << "`";
-}
-
 int main() {
-    std::string s;
     std::cout << "line >>> ";
-    std::getline(std::cin, s);
+    std::string input;
+    std::getline(std::cin, input);
 
-    const char *src = s.c_str();
-    KSIndexType src_len = (KSIndexType)strlen(src);
+    KSCSource const *source =
+        ks_c_lexer_source_new(KSCSourceKind::Stdin, input.c_str(), nullptr);
 
-    KSStrType bytes = nullptr;
-    KSIndexType bytes_len = 0;
-    const KSCLexToken *tokens = nullptr;
-    KSIndexType tokens_len = 0;
-
-    int i = ksc_lex((KSStrType)src, src_len, &bytes, &bytes_len, &tokens,
-                    &tokens_len);
-
-    if (tokens == nullptr) {
-        std::cerr << "Error: 无法解析" << std::endl;
-        return 1;
+    if (source == nullptr) {
+        std::cout << "无法创建源";
+        return -1;
     }
 
-    for (KSIndexType j = 0; j < tokens_len; j++) {
-        switch (ksc_token_get_kind(&tokens[j])) {
-        case KS_TOKEN_NEWLINE:
-            std::cout << "(NEWLINE)" << std::endl;
+    KSCLexer *lexer = ks_c_lexer_new(source);
+
+    if (lexer == nullptr) {
+        std::cout << "无法创建词法分析器";
+        ks_c_lexer_source_free(source);
+        return -1;
+    }
+
+    while (true) {
+        KSCTokenResult const *res = ks_c_lexer_next(lexer);
+        if (res == nullptr) {
             break;
-        case KS_TOKEN_KEYWORD:
-            std::cout << "(KEYWORD, ";
-            print_keyword(ksc_token_get_index(&tokens[j]));
-            std::cout << ")" << std::endl;
-            break;
-        case KS_TOKEN_IDENT:
-            std::cout << "(IDENT, ";
-            print_ident(bytes, ksc_token_get_index(&tokens[j]), bytes_len);
-            std::cout << ")" << std::endl;
-            break;
-        case KS_TOKEN_NUMBER:
-            std::cout << "(NUMBER, " << ksc_token_get_number(&tokens[j]) << ")"
-                      << std::endl;
-            break;
-        case KS_TOKEN_OPERATOR:
-            std::cout << "(OPERATOR, ";
-            print_operator(ksc_token_get_index(&tokens[j]));
-            std::cout << ")" << std::endl;
-            break;
-        case KS_TOKEN_PUNCTUATOR:
-            std::cout << "(PUNCTUATOR, ";
-            print_punctuator(ksc_token_get_index(&tokens[j]));
-            std::cout << ")" << std::endl;
+        } else if (!ks_c_token_result_is_ok(res)) {
+            ks_c_token_result_free(res);
+            std::cout << "词法分析错误" << std::endl;
             break;
         }
-    }
-    std::cout << std::endl;
 
-    ksc_lex_free(tokens, bytes);
+        KSCToken const *token = ks_c_get_token(res);
+        if (token == nullptr) {
+            std::cout << "无法获取词法单元" << std::endl;
+            ks_c_token_result_free(res);
+            break;
+        }
 
-    if (i < 0) {
-        std::cerr << "Error: " << i << "个错误" << std::endl;
-        return 1;
+        TokenKind kind = ks_c_token_get_kind(token);
+        uintptr_t start = ks_c_token_get_span_start(token);
+        uintptr_t end = ks_c_token_get_span_end(token);
+
+        std::cout << "(" << ks_c_token_kind_name(kind);
+        if (ks_c_token_is_keyword(kind)) {
+            std::cout << ", " << ks_c_keyword_as_str(kind);
+        } else if (ks_c_token_is_operator(kind)) {
+            std::cout << ", " << ks_c_operator_as_str(kind);
+        } else if (ks_c_token_is_punctuation(kind)) {
+            std::cout << ", " << ks_c_punctuation_as_str(kind);
+        } else if (kind != KS_TOKEN_WHITESPACE && kind != KS_TOKEN_COMMENT) {
+            std::cout << ", `";
+            for (uintptr_t i = start; i < end; i++) {
+                std::cout << input[i];
+            }
+            std::cout << "`";
+        }
+        std::cout << ") " << std::endl;
+
+        ks_c_token_result_free(res);
     }
+
+    ks_c_lexer_source_free(source);
+    ks_c_lexer_free(lexer);
     return 0;
 }

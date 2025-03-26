@@ -67,50 +67,6 @@ pub enum LexUnit {
     Semicolon,
 }
 
-impl LexUnit {
-    #[doc(hidden)]
-    pub fn _lexer(source: &str) -> SpannedIter<LexUnit> {
-        Self::lexer(source).spanned()
-    }
-
-    pub fn is_keyword(&self) -> bool {
-        matches!(
-            self,
-            LexUnit::Def
-                | LexUnit::Else
-                | LexUnit::Extern
-                | LexUnit::For
-                | LexUnit::If
-                | LexUnit::Then
-        )
-    }
-
-    pub fn is_operator(&self) -> bool {
-        matches!(
-            self,
-            LexUnit::Assign
-                | LexUnit::Eq
-                | LexUnit::Ne
-                | LexUnit::Gt
-                | LexUnit::Ge
-                | LexUnit::Lt
-                | LexUnit::Le
-                | LexUnit::Add
-                | LexUnit::Sub
-                | LexUnit::Mul
-                | LexUnit::Div
-                | LexUnit::Mod
-        )
-    }
-
-    pub fn is_punctuation(&self) -> bool {
-        matches!(
-            self,
-            LexUnit::OpenParen | LexUnit::CloseParen | LexUnit::Semicolon
-        )
-    }
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[repr(C)]
 pub enum Keyword {
