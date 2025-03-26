@@ -68,6 +68,7 @@ pub enum LexUnit {
 }
 
 impl LexUnit {
+    #[doc(hidden)]
     pub fn _lexer(source: &str) -> SpannedIter<LexUnit> {
         Self::lexer(source).spanned()
     }
