@@ -146,7 +146,7 @@ impl Display for Source {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[repr(C)]
 pub struct DebugSpan {
     pub line: usize,
@@ -232,18 +232,6 @@ impl<'s> Lexer<'s> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Ident {
-    pub index: usize,
-    pub span: DebugSpan,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Literal {
-    pub val: f64,
-    pub span: DebugSpan,
-}
-
 macro_rules! token_kind_as {
     ($n: ident: $($k: ident),*) => {
         #[derive(Debug, Clone, Copy)]
@@ -267,44 +255,29 @@ macro_rules! token_kind_as {
     };
 }
 
-token_kind_as!(KeywordKind: Def, Else, Extern, For, If, Then);
-
-#[derive(Debug, Clone, Copy)]
-pub struct Keyword {
-    pub kind: KeywordKind,
-    pub span: DebugSpan,
-}
+token_kind_as!(Keyword: Def, Else, Extern, For, If, Then);
 
 token_kind_as! {
-    OperatorKind:
+    Operator:
         Assign,
         Eq, Ne, Gt, Ge, Lt, Le,
         Add, Sub, Mul, Div, Mod,
         And, Or, Not
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct Operator {
-    pub kind: OperatorKind,
+token_kind_as!(Punctuation: OpenParen, CloseParen, Semicolon);
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+pub struct TokenJson {
+    pub kind: TokenKind,
     pub span: DebugSpan,
 }
 
-token_kind_as!(PunctuationKind: OpenParen, CloseParen, Semicolon);
-
-impl Operator {
-    #[inline]
-    pub const fn is_unary(&self) -> bool {
-        matches!(self.kind, OperatorKind::Sub | OperatorKind::Not)
+impl From<Token<'_>> for TokenJson {
+    fn from(token: Token) -> Self {
+        Self {
+            kind: token.kind,
+            span: token.span,
+        }
     }
-
-    #[inline]
-    pub const fn is_binary(&self) -> bool {
-        !self.is_unary()
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Punctuation {
-    pub kind: PunctuationKind,
-    pub span: DebugSpan,
 }

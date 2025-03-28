@@ -1,6 +1,9 @@
 use clap::{Command, arg};
-use kslang::compiler::token::{Token, Tokenizer};
-use std::io::{BufWriter, Read, Write};
+use kslang::compiler::lexer::{Lexer, Source, TokenJson};
+use std::{
+    io::{BufWriter, Read, Write},
+    path::PathBuf,
+};
 
 pub fn command() -> Command {
     Command::new("lexer")
@@ -11,10 +14,10 @@ pub fn command() -> Command {
         .arg(arg!(-s --string <STR> "从终端参数获取源代码"))
 }
 
-enum Output<'a> {
+enum Output {
     Stdout,
     Stderr,
-    File(&'a str),
+    File(PathBuf),
 }
 
 #[derive(Clone, Copy)]
@@ -25,19 +28,22 @@ enum Format {
 }
 
 pub fn match_command(matches: &clap::ArgMatches, verbose: bool) -> anyhow::Result<()> {
-    let (source, in_from) = if let Some(path) = matches.get_one("file") {
+    let source = if let Some(path) = matches.get_one("file") {
         let path: &String = path;
         let mut file = std::fs::File::open(path)?;
         let mut source = String::new();
         file.read_to_string(&mut source)?;
-        (source, path.as_str())
+
+        let path = std::path::PathBuf::from(path);
+        let contents = source.clone();
+        Source::File { path, contents }
     } else if let Some(s) = matches.get_one("string") {
         let s: &String = s;
-        (s.to_string(), "string")
+        Source::String(s.clone())
     } else {
         let mut source = String::new();
         std::io::stdin().read_to_string(&mut source)?;
-        (source, "stdin")
+        Source::Stdin(source)
     };
 
     let out_to = if let Some(path) = matches.get_one("output") {
@@ -46,7 +52,7 @@ pub fn match_command(matches: &clap::ArgMatches, verbose: bool) -> anyhow::Resul
         match path.as_str() {
             "stdout" => Output::Stdout,
             "stderr" => Output::Stderr,
-            _ => Output::File(path.as_str()),
+            _ => Output::File(PathBuf::from(path)),
         }
     } else {
         Output::Stdout
@@ -70,16 +76,16 @@ pub fn match_command(matches: &clap::ArgMatches, verbose: bool) -> anyhow::Resul
         Output::File(path) => BufWriter::new(Box::new(std::fs::File::create(path)?)),
     };
 
-    let iter = Tokenizer::new(&source);
+    let iter = Lexer::new(&source);
     let mut err_cnt = 0;
     if matches!(format, Format::Debug | Format::Text) {
         for token in iter {
-            let loc = match token {
+            let span = match token {
                 Ok(token) => {
                     let s = if let Format::Debug = format {
                         format!("{:?}", token)
                     } else if let Format::Text = format {
-                        token.as_binary_string()
+                        format!("{}", token)
                     } else {
                         unreachable!()
                     };
@@ -87,43 +93,29 @@ pub fn match_command(matches: &clap::ArgMatches, verbose: bool) -> anyhow::Resul
                     writer.write_all(s.as_bytes())?;
                     writer.write_all(b"\n")?;
                     writer.flush()?;
-
-                    token.loc
+                    token.span
                 }
-                Err(e) => {
+                Err(span) => {
                     err_cnt += 1;
-                    eprintln!("错误：{}", e);
-                    e.location().clone()
+                    eprintln!("错误：{}@{}", span, source);
+                    span
                 }
             };
 
             if verbose {
-                eprintln!(
-                    "\t<{}..{}@{}>: {:?}",
-                    loc.start,
-                    loc.end,
-                    in_from,
-                    &source[loc.clone()]
-                )
+                eprintln!("\t{}: {:?}", source, &source.text()[span.start..span.end])
             }
         }
     } else {
-        let mut tokens: Vec<Token> = Vec::new();
+        let mut tokens: Vec<TokenJson> = Vec::new();
         for token in iter {
             match token {
-                Ok(token) => tokens.push(token),
-                Err(e) => {
+                Ok(token) => tokens.push(token.into()),
+                Err(span) => {
                     err_cnt += 1;
-                    eprintln!("错误：{}", e);
+                    eprintln!("错误：{}", span);
                     if verbose {
-                        let loc = e.location();
-                        eprintln!(
-                            "\t<{}..{}@{}>: {:?}",
-                            loc.start,
-                            loc.end,
-                            in_from,
-                            &source[loc.clone()]
-                        )
+                        eprintln!("\t{}: {:?}", source, &source.text()[span.start..span.end])
                     }
                 }
             }
