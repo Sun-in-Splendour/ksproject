@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
 };
 
-#[derive(Clone, Copy, Debug, Deserialize, Logos, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Logos, Serialize, PartialEq, Eq)]
 #[repr(C)]
 pub enum TokenKind {
     #[regex(r"[\s]+")]
@@ -21,6 +21,10 @@ pub enum TokenKind {
     Number,
 
     // Keywords ===========================================================================
+    #[token("break")]
+    Break,
+    #[token("continue")]
+    Continue,
     #[token("def")]
     Def,
     #[token("else")]
@@ -31,6 +35,8 @@ pub enum TokenKind {
     For,
     #[token("if")]
     If,
+    #[token("return")]
+    Return,
     #[token("then")]
     Then,
 
@@ -77,6 +83,10 @@ pub enum TokenKind {
     OpenParen,
     #[token(")")]
     CloseParen,
+    #[token("{")]
+    OpenBrace,
+    #[token("}")]
+    CloseBrace,
     #[token(";")]
     Semicolon,
 }
@@ -89,11 +99,14 @@ impl Display for TokenKind {
             TokenKind::Ident => f.write_str("Ident"),
             TokenKind::Number => f.write_str("Number"),
 
-            TokenKind::Def
+            TokenKind::Break
+            | TokenKind::Continue
+            | TokenKind::Def
             | TokenKind::Else
             | TokenKind::Extern
             | TokenKind::For
             | TokenKind::If
+            | TokenKind::Return
             | TokenKind::Then => f.write_str("Keyword"),
 
             TokenKind::Assign
@@ -112,9 +125,11 @@ impl Display for TokenKind {
             | TokenKind::Or
             | TokenKind::Not => f.write_str("Operator"),
 
-            TokenKind::OpenParen | TokenKind::CloseParen | TokenKind::Semicolon => {
-                f.write_str("Punctuation")
-            }
+            TokenKind::OpenParen
+            | TokenKind::CloseParen
+            | TokenKind::OpenBrace
+            | TokenKind::CloseBrace
+            | TokenKind::Semicolon => f.write_str("Punctuation"),
         }
     }
 }
@@ -146,7 +161,7 @@ impl Display for Source {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[repr(C)]
 pub struct DebugSpan {
     pub line: usize,
@@ -160,7 +175,17 @@ impl Display for DebugSpan {
     }
 }
 
-#[derive(Debug)]
+impl DebugSpan {
+    pub fn merge(self, other: Self) -> Self {
+        DebugSpan {
+            line: self.line,
+            start: self.start,
+            end: other.end,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Token<'s> {
     pub kind: TokenKind,
     pub text: &'s str,
@@ -173,6 +198,21 @@ impl Display for Token<'_> {
             write!(f, "({})", self.kind)
         } else {
             write!(f, "({}, `{}`)", self.kind, self.text)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+pub struct TokenJson {
+    pub kind: TokenKind,
+    pub span: DebugSpan,
+}
+
+impl From<Token<'_>> for TokenJson {
+    fn from(token: Token) -> Self {
+        Self {
+            kind: token.kind,
+            span: token.span,
         }
     }
 }
@@ -232,52 +272,73 @@ impl<'s> Lexer<'s> {
     }
 }
 
-macro_rules! token_kind_as {
-    ($n: ident: $($k: ident),*) => {
-        #[derive(Debug, Clone, Copy)]
-        pub enum $n { $($k = TokenKind::$k as isize),* }
+#[derive(Debug, Clone, Copy)]
+pub enum Operator {
+    Assign = TokenKind::Assign as isize,
 
-        impl TryFrom<TokenKind> for $n {
-            type Error = TokenKind;
-            fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
-                match value {
-                    $(TokenKind::$k => Ok($n::$k),)*
-                    _ => Err(value),
-                }
-            }
+    // Comparison Operators
+    Eq,
+    Ne,
+    Gt,
+    Ge,
+    Lt,
+    Le,
+
+    // Arithmetic Operators
+    Add,
+    Sub, // ALSO Neg
+    Mul,
+    Div,
+    Mod,
+
+    // Boolean Operators
+    And,
+    Or,
+    Not = TokenKind::Not as isize,
+}
+
+impl TryFrom<TokenKind> for Operator {
+    type Error = ();
+    fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
+        match value {
+            TokenKind::Assign => Ok(Self::Assign),
+            TokenKind::Eq => Ok(Self::Eq),
+            TokenKind::Ne => Ok(Self::Ne),
+            TokenKind::Gt => Ok(Self::Gt),
+            TokenKind::Ge => Ok(Self::Ge),
+            TokenKind::Lt => Ok(Self::Lt),
+            TokenKind::Le => Ok(Self::Le),
+            TokenKind::Add => Ok(Self::Add),
+            TokenKind::Sub => Ok(Self::Sub),
+            TokenKind::Mul => Ok(Self::Mul),
+            TokenKind::Div => Ok(Self::Div),
+            TokenKind::Mod => Ok(Self::Mod),
+            TokenKind::And => Ok(Self::And),
+            TokenKind::Or => Ok(Self::Or),
+            TokenKind::Not => Ok(Self::Not),
+            _ => Err(()),
         }
-
-        impl From<$n> for TokenKind {
-            fn from(value: $n) -> Self {
-                match value { $($n::$k => TokenKind::$k),* }
-            }
-        }
-    };
+    }
 }
 
-token_kind_as!(Keyword: Def, Else, Extern, For, If, Then);
-
-token_kind_as! {
-    Operator:
-        Assign,
-        Eq, Ne, Gt, Ge, Lt, Le,
-        Add, Sub, Mul, Div, Mod,
-        And, Or, Not
-}
-
-token_kind_as!(Punctuation: OpenParen, CloseParen, Semicolon);
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
-pub struct TokenJson {
-    pub kind: TokenKind,
-    pub span: DebugSpan,
-}
-
-impl From<Token<'_>> for TokenJson {
-    fn from(token: Token) -> Self {
-        Self {
-            kind: token.kind,
-            span: token.span,
+impl Display for Operator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Assign => f.write_str("="),
+            Self::Eq => f.write_str("=="),
+            Self::Ne => f.write_str("!="),
+            Self::Gt => f.write_str(">"),
+            Self::Ge => f.write_str(">="),
+            Self::Lt => f.write_str("<"),
+            Self::Le => f.write_str("<="),
+            Self::Add => f.write_str("+"),
+            Self::Sub => f.write_str("-"),
+            Self::Mul => f.write_str("*"),
+            Self::Div => f.write_str("/"),
+            Self::Mod => f.write_str("%"),
+            Self::And => f.write_str("&&"),
+            Self::Or => f.write_str("||"),
+            Self::Not => f.write_str("!"),
         }
     }
 }

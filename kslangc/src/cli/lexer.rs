@@ -12,6 +12,7 @@ pub fn command() -> Command {
         .arg(arg!(-F --format <FORMAT> "指定源代码格式，默认是 json。可选： json | text | debug"))
         .arg(arg!(-o --output <OUTPUT> "输出位置，默认输出到标准输出。可选： stdout | stderr | 文件名"))
         .arg(arg!(-s --string <STR> "从终端参数获取源代码"))
+        .arg(arg!(--ast "输出抽象语法树(测试)"))
 }
 
 enum Output {
@@ -108,9 +109,13 @@ pub fn match_command(matches: &clap::ArgMatches, verbose: bool) -> anyhow::Resul
         }
     } else {
         let mut tokens: Vec<TokenJson> = Vec::new();
+        let mut tokens_debug = Vec::new();
         for token in iter {
             match token {
-                Ok(token) => tokens.push(token.into()),
+                Ok(token) => {
+                    tokens_debug.push(token.clone());
+                    tokens.push(token.into());
+                }
                 Err(span) => {
                     err_cnt += 1;
                     eprintln!("错误：{}", span);
@@ -124,6 +129,11 @@ pub fn match_command(matches: &clap::ArgMatches, verbose: bool) -> anyhow::Resul
         let string = serde_json::to_string(&tokens)?;
         writer.write_all(string.as_bytes())?;
         writer.write_all(b"\n")?;
+
+        if matches.get_flag("ast") {
+            let ast_ret = kslang::compiler::parser::parse_stmt(&tokens_debug);
+            println!("{:#?}", ast_ret);
+        }
     }
 
     writer.flush()?;
