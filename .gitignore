@@ -1,3 +1,7 @@
-target/
-build/
 .cache/
+.zig-cache/
+
+target/
+zig-out/
+
+.clangd

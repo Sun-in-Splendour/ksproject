@@ -1,17 +1,18 @@
 use logos::{Logos, SpannedIter};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
     fmt::{Debug, Display},
     path::PathBuf,
 };
 
-#[derive(Clone, Copy, Debug, Deserialize, Logos, Serialize, PartialEq, Eq)]
+#[derive(Logos, Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[repr(C)]
 pub enum TokenKind {
-    #[regex(r"[\s]+")]
+    #[token("\u{FEFF}")]
+    UTF8BOM,
+    #[regex(r"\s+")]
     Whitespace,
-    #[regex(r"#.*")]
+    #[regex(r"#[^\n]*(\n)?")]
     Comment,
     #[regex(r"[\p{L}_][\p{L}\p{N}_]*")]
     Ident,
@@ -35,6 +36,8 @@ pub enum TokenKind {
     For,
     #[token("if")]
     If,
+    #[token("in")]
+    In,
     #[token("return")]
     Return,
     #[token("then")]
@@ -67,8 +70,6 @@ pub enum TokenKind {
     Mul,
     #[token("/")]
     Div,
-    #[token("%")]
-    Mod,
 
     // Boolean Operators
     #[token("&&")]
@@ -89,15 +90,18 @@ pub enum TokenKind {
     CloseBrace,
     #[token(";")]
     Semicolon,
+    #[token(",")]
+    Comma,
 }
 
-impl Display for TokenKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl TokenKind {
+    const fn kind_str(self) -> &'static str {
         match self {
-            TokenKind::Whitespace => f.write_str("Whitespace"),
-            TokenKind::Comment => f.write_str("Comment"),
-            TokenKind::Ident => f.write_str("Ident"),
-            TokenKind::Number => f.write_str("Number"),
+            TokenKind::UTF8BOM => "UTF8BOM",
+            TokenKind::Whitespace => "Whitespace",
+            TokenKind::Comment => "Comment",
+            TokenKind::Ident => "Ident",
+            TokenKind::Number => "Number",
 
             TokenKind::Break
             | TokenKind::Continue
@@ -106,8 +110,9 @@ impl Display for TokenKind {
             | TokenKind::Extern
             | TokenKind::For
             | TokenKind::If
+            | TokenKind::In
             | TokenKind::Return
-            | TokenKind::Then => f.write_str("Keyword"),
+            | TokenKind::Then => "Keyword",
 
             TokenKind::Assign
             | TokenKind::Eq
@@ -120,16 +125,62 @@ impl Display for TokenKind {
             | TokenKind::Sub
             | TokenKind::Mul
             | TokenKind::Div
-            | TokenKind::Mod
             | TokenKind::And
             | TokenKind::Or
-            | TokenKind::Not => f.write_str("Operator"),
+            | TokenKind::Not => "Operator",
 
             TokenKind::OpenParen
             | TokenKind::CloseParen
             | TokenKind::OpenBrace
             | TokenKind::CloseBrace
-            | TokenKind::Semicolon => f.write_str("Punctuation"),
+            | TokenKind::Semicolon
+            | TokenKind::Comma => "Punctuation",
+        }
+    }
+
+    const fn value_str(self) -> Option<&'static str> {
+        match self {
+            TokenKind::UTF8BOM
+            | TokenKind::Whitespace
+            | TokenKind::Comment
+            | TokenKind::Ident
+            | TokenKind::Number => None,
+
+            TokenKind::Break => Some("break"),
+            TokenKind::Continue => Some("continue"),
+            TokenKind::Def => Some("def"),
+            TokenKind::Else => Some("else"),
+            TokenKind::Extern => Some("extern"),
+            TokenKind::For => Some("for"),
+            TokenKind::If => Some("if"),
+            TokenKind::In => Some("in"),
+            TokenKind::Return => Some("return"),
+            TokenKind::Then => Some("then"),
+
+            TokenKind::Assign => Some("="),
+
+            TokenKind::Eq => Some("=="),
+            TokenKind::Ne => Some("!="),
+            TokenKind::Gt => Some(">"),
+            TokenKind::Ge => Some(">="),
+            TokenKind::Lt => Some("<"),
+            TokenKind::Le => Some("<="),
+
+            TokenKind::Add => Some("+"),
+            TokenKind::Sub => Some("-"),
+            TokenKind::Mul => Some("*"),
+            TokenKind::Div => Some("/"),
+
+            TokenKind::And => Some("&&"),
+            TokenKind::Or => Some("||"),
+            TokenKind::Not => Some("!"),
+
+            TokenKind::OpenParen => Some("("),
+            TokenKind::CloseParen => Some(")"),
+            TokenKind::OpenBrace => Some("{"),
+            TokenKind::CloseBrace => Some("}"),
+            TokenKind::Semicolon => Some(";"),
+            TokenKind::Comma => Some(","),
         }
     }
 }
@@ -161,23 +212,47 @@ impl Display for Source {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Default)]
+pub struct SourceSequence {
+    pub sources: Vec<Source>,
+}
+
+impl SourceSequence {
+    pub fn new() -> Self {
+        Self { sources: vec![] }
+    }
+
+    pub fn add(&mut self, source: Source) -> usize {
+        let index = self.sources.len();
+        self.sources.push(source);
+        index
+    }
+
+    pub fn get_text(&self, span: CodeSpan) -> &str {
+        &self.sources[span.src_id].text()[span.start..span.end]
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[repr(C)]
-pub struct DebugSpan {
+pub struct CodeSpan {
     pub line: usize,
+
+    pub src_id: usize,
     pub start: usize,
     pub end: usize,
 }
 
-impl Display for DebugSpan {
+impl Display for CodeSpan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}..{}", self.line, self.start, self.end)
     }
 }
 
-impl DebugSpan {
+impl CodeSpan {
     pub fn merge(self, other: Self) -> Self {
-        DebugSpan {
+        CodeSpan {
+            src_id: self.src_id,
             line: self.line,
             start: self.start,
             end: other.end,
@@ -185,68 +260,45 @@ impl DebugSpan {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Token<'s> {
-    pub kind: TokenKind,
-    pub text: &'s str,
-    pub span: DebugSpan,
-}
-
-impl Display for Token<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if matches!(self.kind, TokenKind::Whitespace | TokenKind::Comment) {
-            write!(f, "({})", self.kind)
-        } else {
-            write!(f, "({}, `{}`)", self.kind, self.text)
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
-pub struct TokenJson {
+pub struct Token {
     pub kind: TokenKind,
-    pub span: DebugSpan,
+    pub span: CodeSpan,
 }
 
-impl From<Token<'_>> for TokenJson {
-    fn from(token: Token) -> Self {
-        Self {
-            kind: token.kind,
-            span: token.span,
+impl Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(value) = self.kind.value_str() {
+            write!(f, "<{}, `{}`>", self.kind.kind_str(), value)
+        } else {
+            write!(f, "<{}>", self.kind.kind_str())
         }
     }
 }
 
 pub struct Lexer<'s> {
-    source: &'s Source,
+    src_id: usize,
+    text: &'s str,
     iter: SpannedIter<'s, TokenKind>,
     line: usize,
-    symbols: HashMap<&'s str, Vec<DebugSpan>>,
 }
 
-impl<'s> Iterator for Lexer<'s> {
-    type Item = Result<Token<'s>, DebugSpan>;
+impl Iterator for Lexer<'_> {
+    type Item = Result<Token, CodeSpan>;
     fn next(&mut self) -> Option<Self::Item> {
         let (kind_res, span) = self.iter.next()?;
-        let span = DebugSpan {
+        let span = CodeSpan {
+            src_id: self.src_id,
             line: self.line,
             start: span.start,
             end: span.end,
         };
 
         if let Ok(kind) = kind_res {
-            let text = &self.source.text()[span.start..span.end];
+            let text = &self.text[span.start..span.end];
             self.line += text.chars().filter(|c| *c == '\n').count();
 
-            if matches!(kind, TokenKind::Ident) {
-                if let Some(spans) = self.symbols.get_mut(text) {
-                    spans.push(span);
-                } else {
-                    self.symbols.insert(text, vec![span]);
-                }
-            }
-
-            Some(Ok(Token { kind, text, span }))
+            Some(Ok(Token { kind, span }))
         } else {
             Some(Err(span))
         }
@@ -254,25 +306,20 @@ impl<'s> Iterator for Lexer<'s> {
 }
 
 impl<'s> Lexer<'s> {
-    pub fn new(source: &'s Source) -> Self {
-        let text = source.text();
+    pub fn new(src_id: usize, srcs: &'s SourceSequence) -> Self {
+        let text = srcs.sources[src_id].text();
         let iter = TokenKind::lexer(text).spanned();
         let line = 0;
-        let symbols = HashMap::new();
         Self {
-            source,
+            src_id,
+            text,
             iter,
             line,
-            symbols,
         }
-    }
-
-    pub fn finish(self) -> HashMap<&'s str, Vec<DebugSpan>> {
-        self.symbols
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub enum Operator {
     Assign = TokenKind::Assign as isize,
 
@@ -289,7 +336,6 @@ pub enum Operator {
     Sub, // ALSO Neg
     Mul,
     Div,
-    Mod,
 
     // Boolean Operators
     And,
@@ -312,7 +358,6 @@ impl TryFrom<TokenKind> for Operator {
             TokenKind::Sub => Ok(Self::Sub),
             TokenKind::Mul => Ok(Self::Mul),
             TokenKind::Div => Ok(Self::Div),
-            TokenKind::Mod => Ok(Self::Mod),
             TokenKind::And => Ok(Self::And),
             TokenKind::Or => Ok(Self::Or),
             TokenKind::Not => Ok(Self::Not),
@@ -335,7 +380,6 @@ impl Display for Operator {
             Self::Sub => f.write_str("-"),
             Self::Mul => f.write_str("*"),
             Self::Div => f.write_str("/"),
-            Self::Mod => f.write_str("%"),
             Self::And => f.write_str("&&"),
             Self::Or => f.write_str("||"),
             Self::Not => f.write_str("!"),

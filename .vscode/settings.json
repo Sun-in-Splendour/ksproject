@@ -1,0 +1,7 @@
+{
+    "clangd.arguments": [
+        "--enable-config"
+    ],
+    "zig.path": "zig",
+    "zig.zls.path": "zls"
+}

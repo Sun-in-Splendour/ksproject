@@ -1,4 +1,6 @@
-mod lexer;
+mod ast;
+mod lex;
+mod utils;
 
 use clap::{Command, arg};
 
@@ -17,9 +19,9 @@ fn command() -> Command {
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
         .arg(arg!(-v --verbose "启用详细输出"))
-        .subcommand(lexer::command())
+        .subcommand(lex::command())
+        .subcommand(ast::command())
 }
-
 macro_rules! match_subcommands {
     ($m:expr, $v:expr $(=> $($sub:ident),* $(,)?)?) => {
         $($(
@@ -32,5 +34,5 @@ macro_rules! match_subcommands {
 
 fn match_command(matches: &clap::ArgMatches) -> anyhow::Result<bool> {
     let verbose = matches.get_flag("verbose");
-    Ok(match_subcommands!(matches, verbose => lexer))
+    Ok(match_subcommands!(matches, verbose => lex, ast))
 }

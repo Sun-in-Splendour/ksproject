@@ -5,5 +5,5 @@ fn main() {
         .with_crate(crate_dir)
         .generate()
         .expect("Unable to generate bindings")
-        .write_to_file("../c_api/_libkslang_autogen.h");
+        .write_to_file("../include/ksc/_libkslang_autogen.h");
 }

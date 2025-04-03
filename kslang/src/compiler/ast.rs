@@ -1,21 +1,20 @@
-use super::lexer::{DebugSpan, Operator};
+use super::lexer::{CodeSpan, Operator};
+use serde::{Deserialize, Serialize};
 
-type P<T> = Box<T>;
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum ExprKind {
     Ident,
     Lit(f64),
-    Parented(P<Expr>),
+    Parented(Box<Expr>),
     Block(Vec<Stmt>),
 
     /// foo(x, y, z)
     Call {
-        callee: P<Expr>,
+        callee: Box<Expr>,
         args: Vec<Expr>,
         /// foo(x, y, z)
         ///    ^^^^^^^^^
-        args_span: DebugSpan,
+        args_span: CodeSpan,
     },
 
     /// -x | !y
@@ -23,8 +22,8 @@ pub enum ExprKind {
         op: Operator,
         /// -x
         /// ^
-        op_span: DebugSpan,
-        arg: P<Expr>,
+        op_span: CodeSpan,
+        arg: Box<Expr>,
     },
 
     /// x + y
@@ -32,72 +31,59 @@ pub enum ExprKind {
         op: Operator,
         /// x + y
         ///   ^
-        op_span: DebugSpan,
-        left: P<Expr>,
-        right: P<Expr>,
+        op_span: CodeSpan,
+        left: Box<Expr>,
+        right: Box<Expr>,
     },
 
     If {
         if_then_exprs: Vec<IfThenExpr>,
         /// if cond then then_branch else if cond2 then else_branch2 ...
         /// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        if_then_span: DebugSpan,
-        else_branch: Option<P<ElseExpr>>,
+        if_then_span: CodeSpan,
+        else_branch: Option<Box<ElseExpr>>,
     },
-
-    For {
-        loop_var: P<Expr>,
-        loop_range: P<Expr>,
-        /// for i in 0..10 { loop_body }
-        /// ^^^^^^^^^^^^^^
-        head_span: DebugSpan,
-        loop_body: P<Expr>,
-    },
+    // For {
+    //     loop_var: Box<Expr>,
+    //     loop_range: Box<Expr>,
+    //     /// for i in 0..10 { loop_body }
+    //     /// ^^^^^^^^^^^^^^
+    //     head_span: CodeSpan,
+    //     loop_body: Box<Expr>,
+    // },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IfThenExpr {
     pub cond: Expr,
     pub then: Expr,
     /// ... if cond then then_branch ...
     ///     ^^^^^^^^^^^^^^^^^^^^^^^^
-    pub span: DebugSpan,
+    pub span: CodeSpan,
 }
 
-impl IfThenExpr {
-    fn is_evalable(&self) -> bool {
-        self.then.is_evalable()
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ElseExpr {
     pub expr: Expr,
     /// ... else else_branch
     ///     ^^^^^^^^^^^^^^^^
-    pub span: DebugSpan,
+    pub span: CodeSpan,
 }
 
-impl ElseExpr {
-    fn is_evalable(&self) -> bool {
-        self.expr.is_evalable()
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Expr {
     pub kind: ExprKind,
-    pub span: DebugSpan,
+    pub span: CodeSpan,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum StmtKind {
     Assign {
         left: Expr,
         right: Expr,
         /// x = y
         ///   ^
-        assign_span: DebugSpan,
+        assign_span: CodeSpan,
     },
 
     Break,
@@ -108,10 +94,11 @@ pub enum StmtKind {
         args: Vec<Expr>,
         /// def add(a, b) a + b
         ///        ^^^^^^
+        args_span: CodeSpan,
         body: Expr,
         /// def add(a, b) a + b
         ///               ^^^^^
-        body_span: DebugSpan,
+        body_span: CodeSpan,
     },
 
     Expr(Expr),
@@ -122,54 +109,14 @@ pub enum StmtKind {
         args: Vec<Expr>,
         /// extern add(a, b);
         ///           ^^^^^^
-        args_span: DebugSpan,
+        args_span: CodeSpan,
     },
 
     Return(Expr),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Stmt {
     pub kind: StmtKind,
-    pub span: DebugSpan,
-}
-
-impl Expr {
-    pub fn is_evalable(&self) -> bool {
-        match &self.kind {
-            ExprKind::Lit(_)
-            | ExprKind::Ident
-            | ExprKind::Call { .. }
-            | ExprKind::UnOp { .. }
-            | ExprKind::BinOp { .. } => true,
-            ExprKind::For { .. } => false,
-            ExprKind::Parented(e) => e.is_evalable(),
-
-            ExprKind::Block(stmts) => {
-                if let Some(stmt) = stmts.last() {
-                    stmt.is_evalable()
-                } else {
-                    false
-                }
-            }
-
-            ExprKind::If {
-                if_then_exprs,
-                else_branch,
-                ..
-            } => {
-                if let Some(else_) = else_branch {
-                    if_then_exprs.iter().all(|e| e.is_evalable()) && else_.is_evalable()
-                } else {
-                    false
-                }
-            }
-        }
-    }
-}
-
-impl Stmt {
-    pub fn is_evalable(&self) -> bool {
-        todo!()
-    }
+    pub span: CodeSpan,
 }
