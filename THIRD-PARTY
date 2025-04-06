@@ -1,0 +1,47 @@
+Dependencies
+
+anyhow
+=========
+- License: MIT License, Apache License 2.0
+- Source: https://github.com/dtolnay/anyhow/
+- License Text: 
+    - https://github.com/dtolnay/anyhow/blob/HEAD/LICENSE-MIT
+    - https://github.com/dtolnay/anyhow/blob/HEAD/LICENSE-APACHE
+
+cbindgen
+=========
+- License: MPL-2.0 license
+- Source: https://github.com/mozilla/cbindgen/
+- License Text: https://github.com/mozilla/cbindgen/blob/HEAD/LICENSE
+
+clap
+=========
+- License: MIT License, Apache License 2.0
+- Source: https://github.com/clap-rs/clap/
+- License Text: 
+    - https://github.com/clap-rs/clap/blob/HEAD/LICENSE-MIT
+    - https://github.com/clap-rs/clap/blob/HEAD/LICENSE-APACHE
+
+logos
+=========
+- License: MIT License, Apache License 2.0
+- Source: https://github.com/maciejhirsz/logos/
+- License Text: 
+    - https://github.com/maciejhirsz/logos/blob/HEAD/LICENSE-MIT
+    - https://github.com/maciejhirsz/logos/blob/HEAD/LICENSE-APACHE
+
+serde
+=========
+- License: MIT License, Apache License 2.0
+- Source: https://github.com/serde-rs/serde/
+- License Text: 
+    - https://github.com/serde-rs/serde/blob/HEAD/LICENSE-MIT
+    - https://github.com/serde-rs/serde/blob/HEAD/LICENSE-APACHE
+
+serde_json
+========= 
+- License: MIT License, Apache License 2.0
+- Source: https://github.com/serde-rs/json/
+- License Text: 
+    - https://github.com/serde-rs/json/blob/HEAD/LICENSE-MIT
+    - https://github.com/serde-rs/json/blob/HEAD/LICENSE-APACHE

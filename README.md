@@ -9,6 +9,11 @@
 
 ---
 
+## 许可证
+
+MIT License ([LICENSE-MIT](./LICENSE-MIT))
+Apache License 2.0 ([LICENSE-APACHE](./LICENSE-APACHE))
+
 ## 目录结构
 
 - kslang 前端实现
