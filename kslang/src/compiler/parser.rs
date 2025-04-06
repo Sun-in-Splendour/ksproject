@@ -1,17 +1,56 @@
 use super::{
+    CodeSpan,
     ast::{ElseExpr, Expr, ExprKind, IfThenExpr, Stmt, StmtKind},
-    lexer::{CodeSpan, Operator, Token, TokenKind},
+    lexer::{Operator, Token, TokenKind},
 };
+
+type Res<'s, T> = Result<(T, &'s [Token], CodeSpan), ParseError>;
+type Ctx<'s> = (&'s str, &'s [Token], CodeSpan);
 
 #[derive(Debug, Clone)]
 pub enum ParseError {
     UnexpectedEnd(CodeSpan),
     UnexpectedToken(Token),
+
+    AssignRightExprError(Box<Self>),
+    ConsecutiveAssignError(CodeSpan),
+    ReturnExprError(Box<Self>),
+
+    ArgsNonBegin(CodeSpan),
+    ArgsNonEnd(CodeSpan),
+    ArgsExprError(Box<Self>),
+    ArgsCommaError(CodeSpan),
+
+    ForIdentError(CodeSpan),
+    ForInError(CodeSpan),
+    ForIterError(Box<Self>),
+    ForBodyError(Box<Self>),
+
+    DefNameError(CodeSpan),
+    DefArgsError(Box<Self>),
+    DefBodyError(Box<Self>),
+
+    ExternNameError(CodeSpan),
+    ExternArgsError(Box<Self>),
+    ExternEndError(CodeSpan),
+
     FloatError(Token),
+    CondExprError(Box<Self>),
+    ThenTokenError(Token),
+    ThenExprError(Box<Self>),
 }
 
-type Res<'s, T> = Result<(T, &'s [Token], CodeSpan), ParseError>;
-type Ctx<'s> = (&'s str, &'s [Token], CodeSpan);
+macro_rules! next_or_ret {
+    ($($e:expr),* $(,)?) => {
+        $(match $e {
+            Ok(t) => return Ok(t),
+            Err(err) => match err {
+                ParseError::UnexpectedToken(_) => {}
+                _ => return Err(err),
+            },
+        })*
+    };
+}
 
 fn parse_skips(ctx: Ctx) -> Res<&Token> {
     let (src, tokens, span) = ctx;
@@ -20,47 +59,88 @@ fn parse_skips(ctx: Ctx) -> Res<&Token> {
         .split_first()
         .ok_or(ParseError::UnexpectedEnd(span))?;
 
-    if !matches!(token.kind, TokenKind::Whitespace | TokenKind::Comment) {
+    if !matches!(
+        token.kind,
+        TokenKind::Whitespace | TokenKind::Comment | TokenKind::UTF8BOM
+    ) {
         Ok((token, rest, token.span))
     } else {
         parse_skips((src, rest, token.span))
     }
 }
 
-pub fn parse_stmt(ctx: Ctx) -> Res<Stmt> {
-    let (_, rest, span) = ctx;
+pub fn parse_ast(src: &str, tokens: &[Token]) -> Result<Vec<Stmt>, ParseError> {
+    if tokens.is_empty() || src.trim().is_empty() {
+        return Ok(Vec::new());
+    }
 
-    if let Ok(tup) = parse_assign(ctx) {
-        Ok(tup)
-    } else if let Ok(tup) = parse_return(ctx) {
-        Ok(tup)
-    } else if let Ok(tup) = parse_break_continue(ctx) {
-        Ok(tup)
-    } else if let Ok(tup) = parse_def(ctx) {
-        Ok(tup)
-    } else if let Ok(tup) = parse_extern(ctx) {
-        Ok(tup)
-    } else if let Ok((expr, rest, last_span)) = parse_expr(ctx) {
-        let span = expr.span;
-        let kind = StmtKind::Expr(expr);
-        Ok((Stmt { kind, span }, rest, last_span))
-    } else if !rest.is_empty() {
-        Err(ParseError::UnexpectedToken(rest[0]))
-    } else {
-        Err(ParseError::UnexpectedEnd(span))
+    let mut stmts = Vec::new();
+    let mut rest = tokens;
+    let mut last_span = CodeSpan {
+        line: 0,
+        src_id: 0,
+        start: 0,
+        end: 0,
+    };
+
+    while parse_skips((src, rest, last_span)).is_ok() {
+        match parse_stmt((src, rest, last_span)) {
+            Ok((stmt, stmt_rest, span)) => {
+                stmts.push(stmt);
+                rest = stmt_rest;
+                last_span = span;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    Ok(stmts)
+}
+
+fn parse_stmt(ctx: Ctx) -> Res<Stmt> {
+    let (src, rest, span) = ctx;
+
+    next_or_ret! {
+        parse_empty(ctx),
+        parse_assign(ctx),
+        parse_return(ctx),
+        parse_break_continue(ctx),
+        parse_for_loop(ctx),
+        parse_def(ctx),
+        parse_extern(ctx),
+    };
+
+    match parse_expr((src, rest, span)) {
+        Ok((expr, rest, last_span)) => {
+            let span = expr.span;
+            let kind = StmtKind::Expr(expr);
+            let (_, rest, last_span) = parse_semi((src, rest, last_span))?;
+            Ok((Stmt { kind, span }, rest, last_span))
+        }
+        Err(e) => Err(e),
     }
 }
 
 #[inline(always)]
 fn parse_expr(ctx: Ctx) -> Res<Expr> {
-    parse_and_or(ctx)
+    parse_range(ctx)
+}
+
+fn parse_semi(ctx: Ctx) -> Res<()> {
+    let (_, rest, span) = ctx;
+    if let Ok((semi, semi_rest, semi_span)) = parse_skips(ctx) {
+        if matches!(semi.kind, TokenKind::Semicolon) {
+            return Ok(((), semi_rest, semi_span));
+        }
+    }
+    Ok(((), rest, span))
 }
 
 fn parse_assign(ctx: Ctx) -> Res<Stmt> {
     let (src, _, _) = ctx;
 
     let (ident, ident_rest, _) = parse_skips(ctx)?;
-    if !matches!(ident.kind, TokenKind::Ident) {
+    if !matches!(ident.kind, TokenKind::Ident) || ident_rest.is_empty() {
         return Err(ParseError::UnexpectedToken(*ident));
     }
 
@@ -75,7 +155,9 @@ fn parse_assign(ctx: Ctx) -> Res<Stmt> {
     }
 
     let assign_span = op.span;
-    let (right, rest, right_last_span) = parse_expr((src, op_rest, op.span))?;
+
+    let (right, rest, right_last_span) = parse_expr((src, op_rest, op.span))
+        .map_err(|e| ParseError::AssignRightExprError(Box::new(e)))?;
 
     let span = ident.span.merge(right.span);
     let kind = StmtKind::Assign {
@@ -83,7 +165,16 @@ fn parse_assign(ctx: Ctx) -> Res<Stmt> {
         right,
         assign_span,
     };
-    Ok((Stmt { kind, span }, rest, right_last_span))
+
+    if let Ok((a, _, _)) = parse_skips((src, rest, right_last_span)) {
+        if matches!(a.kind, TokenKind::Assign) {
+            let span = ident.span.merge(a.span);
+            return Err(ParseError::ConsecutiveAssignError(span));
+        }
+    }
+
+    let (_, rest, last_span) = parse_semi((src, rest, right_last_span))?;
+    Ok((Stmt { kind, span }, rest, last_span))
 }
 
 fn parse_return(ctx: Ctx) -> Res<Stmt> {
@@ -93,10 +184,13 @@ fn parse_return(ctx: Ctx) -> Res<Stmt> {
         return Err(ParseError::UnexpectedToken(*token));
     }
 
-    let (expr, rest, expr_last_span) = parse_expr((src, rest, token.span))?;
+    let (expr, rest, expr_last_span) = parse_expr((src, rest, token.span))
+        .map_err(|e| ParseError::ReturnExprError(Box::new(e)))?;
     let span = token.span.merge(expr.span);
     let kind = StmtKind::Return(expr);
-    Ok((Stmt { kind, span }, rest, expr_last_span))
+
+    let (_, rest, last_span) = parse_semi((src, rest, expr_last_span))?;
+    Ok((Stmt { kind, span }, rest, last_span))
 }
 
 fn parse_args(ctx: Ctx) -> Res<(Vec<Expr>, CodeSpan)> {
@@ -104,10 +198,11 @@ fn parse_args(ctx: Ctx) -> Res<(Vec<Expr>, CodeSpan)> {
 
     let (open_paren, rest, _) = parse_skips(ctx)?;
     if !matches!(open_paren.kind, TokenKind::OpenParen) {
-        return Err(ParseError::UnexpectedToken(*open_paren));
+        return Err(ParseError::ArgsNonBegin(open_paren.span));
     }
 
     let (mut args, mut rest, mut last_span) = (Vec::new(), rest, open_paren.span);
+    let mut flag = false;
     while let Ok((arg, arg_rest, arg_last_span)) = parse_expr((src, rest, last_span)) {
         args.push(arg);
         rest = arg_rest;
@@ -115,6 +210,7 @@ fn parse_args(ctx: Ctx) -> Res<(Vec<Expr>, CodeSpan)> {
 
         let (c, c_rest, c_last_span) = parse_skips((src, rest, last_span))?;
         if !matches!(c.kind, TokenKind::Comma) {
+            flag = true;
             break;
         }
 
@@ -124,7 +220,11 @@ fn parse_args(ctx: Ctx) -> Res<(Vec<Expr>, CodeSpan)> {
 
     let (close_paren, rest, _) = parse_skips((src, rest, last_span))?;
     if !matches!(close_paren.kind, TokenKind::CloseParen) {
-        return Err(ParseError::UnexpectedToken(*close_paren));
+        if flag {
+            return Err(ParseError::ArgsCommaError(close_paren.span));
+        } else {
+            return Err(ParseError::ArgsNonEnd(close_paren.span));
+        }
     }
 
     let span = open_paren.span.merge(close_paren.span);
@@ -140,14 +240,15 @@ fn parse_extern(ctx: Ctx) -> Res<Stmt> {
 
     let (ident, ident_rest, _) = parse_skips((src, rest, extern_token.span))?;
     if !matches!(ident.kind, TokenKind::Ident) {
-        return Err(ParseError::UnexpectedToken(*ident));
+        return Err(ParseError::ExternNameError(ident.span));
     }
 
-    let ((args, args_span), args_rest, args_last_span) = parse_args((src, ident_rest, ident.span))?;
+    let ((args, args_span), args_rest, args_last_span) = parse_args((src, ident_rest, ident.span))
+        .map_err(|e| ParseError::ExternArgsError(Box::new(e)))?;
 
     let (s_token, s_rest, _) = parse_skips((src, args_rest, args_last_span))?;
     if !matches!(s_token.kind, TokenKind::Semicolon) {
-        return Err(ParseError::UnexpectedToken(*s_token));
+        return Err(ParseError::ExternEndError(s_token.span));
     }
 
     let span = extern_token.span.merge(s_token.span);
@@ -172,11 +273,14 @@ fn parse_def(ctx: Ctx) -> Res<Stmt> {
 
     let (ident, ident_rest, _) = parse_skips((src, rest, def.span))?;
     if !matches!(ident.kind, TokenKind::Ident) {
-        return Err(ParseError::UnexpectedToken(*ident));
+        return Err(ParseError::DefNameError(ident.span));
     }
 
-    let ((args, args_span), args_rest, args_last_span) = parse_args((src, ident_rest, ident.span))?;
-    let (body, body_rest, body_last_span) = parse_expr((src, args_rest, args_last_span))?;
+    let ((args, args_span), args_rest, args_last_span) = parse_args((src, ident_rest, ident.span))
+        .map_err(|e| ParseError::DefArgsError(Box::new(e)))?;
+
+    let (body, body_rest, body_last_span) = parse_expr((src, args_rest, args_last_span))
+        .map_err(|e| ParseError::DefBodyError(Box::new(e)))?;
 
     let span = def.span.merge(body.span);
 
@@ -192,10 +296,14 @@ fn parse_def(ctx: Ctx) -> Res<Stmt> {
         body,
         body_span,
     };
-    Ok((Stmt { kind, span }, body_rest, body_last_span))
+
+    let (_, rest, last_span) = parse_semi((src, body_rest, body_last_span))?;
+    Ok((Stmt { kind, span }, rest, last_span))
 }
 
 fn parse_break_continue(ctx: Ctx) -> Res<Stmt> {
+    let (src, _, _) = ctx;
+
     let (token, rest, _) = parse_skips(ctx)?;
     if !matches!(token.kind, TokenKind::Break | TokenKind::Continue) {
         return Err(ParseError::UnexpectedToken(*token));
@@ -207,7 +315,59 @@ fn parse_break_continue(ctx: Ctx) -> Res<Stmt> {
         TokenKind::Continue => StmtKind::Continue,
         _ => unreachable!(),
     };
-    Ok((Stmt { kind, span }, rest, span))
+
+    let (_, rest, last_span) = parse_semi((src, rest, span))?;
+    Ok((Stmt { kind, span }, rest, last_span))
+}
+
+fn parse_for_loop(ctx: Ctx) -> Res<Stmt> {
+    let (src, _, _) = ctx;
+    let (for_token, for_rest, _) = parse_skips(ctx)?;
+    if !matches!(for_token.kind, TokenKind::For) {
+        return Err(ParseError::UnexpectedToken(*for_token));
+    }
+
+    let (ident, ident_rest, _) = parse_skips((src, for_rest, for_token.span))?;
+    if !matches!(ident.kind, TokenKind::Ident) {
+        return Err(ParseError::ForIdentError(ident.span));
+    }
+
+    let (in_token, in_rest, _) = parse_skips((src, ident_rest, ident.span))?;
+    if !matches!(in_token.kind, TokenKind::In) {
+        return Err(ParseError::ForInError(in_token.span));
+    }
+
+    let (iter, iter_rest, iter_last_span) = parse_expr((src, in_rest, in_token.span))
+        .map_err(|e| ParseError::ForIterError(Box::new(e)))?;
+    let (body, rest, body_last_span) = parse_expr((src, iter_rest, iter_last_span))
+        .map_err(|e| ParseError::ForBodyError(Box::new(e)))?;
+
+    let span = for_token.span.merge(body.span);
+    let ident = Expr {
+        kind: ExprKind::Ident,
+        span: ident.span,
+    };
+    let kind = StmtKind::For {
+        loop_var: Box::new(ident),
+        loop_iter: Box::new(iter),
+        head_span: for_token.span.merge(iter_last_span),
+        loop_body: Box::new(body),
+    };
+
+    let (_, rest, last_span) = parse_semi((src, rest, body_last_span))?;
+    Ok((Stmt { kind, span }, rest, last_span))
+}
+
+fn parse_empty(ctx: Ctx) -> Res<Stmt> {
+    let (semi, rest, span) = parse_skips(ctx)?;
+    if !matches!(semi.kind, TokenKind::Semicolon) {
+        return Err(ParseError::UnexpectedToken(*semi));
+    }
+    let stmt = Stmt {
+        kind: StmtKind::Empty,
+        span,
+    };
+    Ok((stmt, rest, span))
 }
 
 macro_rules! parse_binop {
@@ -242,6 +402,15 @@ macro_rules! parse_binop {
             Ok((left, rest, last_span))
         }
     };
+}
+
+parse_binop! {
+    parse_range, parse_and_or, kind => {
+        match kind {
+            TokenKind::Range => Some(Operator::Range),
+            _ => None,
+        }
+    }
 }
 
 parse_binop! {
@@ -293,11 +462,11 @@ fn parse_unary(ctx: Ctx) -> Res<Expr> {
 
     let (op_token, rest, _) = parse_skips(ctx)?;
     if !matches!(op_token.kind, TokenKind::Not | TokenKind::Sub) {
-        return parse_primary(ctx);
+        return parse_call(ctx);
     }
 
     let op_span = op_token.span;
-    let (expr, rest, last_span) = parse_primary((src, rest, op_span))?;
+    let (expr, rest, last_span) = parse_call((src, rest, op_span))?;
     let span = op_token.span.merge(expr.span);
     let op = match op_token.kind {
         TokenKind::Not => Operator::Not,
@@ -313,45 +482,45 @@ fn parse_unary(ctx: Ctx) -> Res<Expr> {
     Ok((Expr { kind, span }, rest, last_span))
 }
 
-fn parse_primary(ctx: Ctx) -> Res<Expr> {
-    let (_, _, span) = ctx;
-
-    if let Ok(tup) = parse_if_expr(ctx) {
-        Ok(tup)
-    } else if let Ok(tup) = parse_call(ctx) {
-        Ok(tup)
-    } else if let Ok(tup) = parse_block(ctx) {
-        Ok(tup)
-    } else if let Ok(tup) = parse_parented(ctx) {
-        Ok(tup)
-    } else if let Ok(tup) = parse_lit(ctx) {
-        Ok(tup)
-    } else if let Ok(tup) = parse_ident(ctx) {
-        Ok(tup)
-    } else {
-        Err(ParseError::UnexpectedEnd(span))
-    }
-}
-
 fn parse_call(ctx: Ctx) -> Res<Expr> {
     let (src, _, _) = ctx;
     let (ident, ident_rest, _) = parse_skips(ctx)?;
     if !matches!(ident.kind, TokenKind::Ident) {
-        return Err(ParseError::UnexpectedToken(*ident));
+        return parse_primary(ctx);
     }
 
-    let ((args, args_span), args_rest, args_last_span) = parse_args((src, ident_rest, ident.span))?;
-    let span = ident.span.merge(args_span);
-    let ident = Expr {
-        kind: ExprKind::Ident,
-        span: ident.span,
+    match parse_args((src, ident_rest, ident.span)) {
+        Ok(((args, args_span), args_rest, args_last_span)) => {
+            let span = ident.span.merge(args_span);
+            let ident = Expr {
+                kind: ExprKind::Ident,
+                span: ident.span,
+            };
+            let kind = ExprKind::Call {
+                callee: Box::new(ident),
+                args,
+                args_span,
+            };
+            Ok((Expr { kind, span }, args_rest, args_last_span))
+        }
+        Err(ParseError::ArgsNonBegin(_)) => parse_primary(ctx),
+        Err(e) => Err(e),
+    }
+}
+
+fn parse_primary(ctx: Ctx) -> Res<Expr> {
+    let (_, _, span) = ctx;
+
+    next_or_ret! {
+        parse_block(ctx),
+        parse_parented(ctx),
+        parse_if_expr(ctx),
+        parse_lit(ctx),
+        parse_ident(ctx),
+        parse_ellipsis(ctx),
     };
-    let kind = ExprKind::Call {
-        callee: Box::new(ident),
-        args,
-        args_span,
-    };
-    Ok((Expr { kind, span }, args_rest, args_last_span))
+
+    Err(ParseError::UnexpectedEnd(span))
 }
 
 fn parse_block(ctx: Ctx) -> Res<Expr> {
@@ -381,14 +550,16 @@ fn parse_block(ctx: Ctx) -> Res<Expr> {
 
 fn parse_if_then<'s>(if_token: &'s Token, ctx: Ctx<'s>) -> Res<'s, IfThenExpr> {
     let (src, _, _) = ctx;
-    let (cond, cond_rest, cond_last_span) = parse_expr(ctx)?;
+    let (cond, cond_rest, cond_last_span) =
+        parse_expr(ctx).map_err(|e| ParseError::CondExprError(Box::new(e)))?;
 
     let (then_token, then_rest, _) = parse_skips((src, cond_rest, cond_last_span))?;
     if !matches!(then_token.kind, TokenKind::Then) {
-        return Err(ParseError::UnexpectedToken(*then_token));
+        return Err(ParseError::ThenTokenError(*then_token));
     }
 
-    let (then, expr_rest, expr_last_span) = parse_expr((src, then_rest, then_token.span))?;
+    let (then, expr_rest, expr_last_span) = parse_expr((src, then_rest, then_token.span))
+        .map_err(|e| ParseError::ThenExprError(Box::new(e)))?;
     let span = if_token.span.merge(then.span);
     Ok((IfThenExpr { cond, then, span }, expr_rest, expr_last_span))
 }
@@ -492,6 +663,17 @@ fn parse_ident(ctx: Ctx) -> Res<Expr> {
     } else {
         let span = token.span;
         let kind = ExprKind::Ident;
+        Ok((Expr { kind, span }, rest, span))
+    }
+}
+
+fn parse_ellipsis(ctx: Ctx) -> Res<Expr> {
+    let (token, rest, _) = parse_skips(ctx)?;
+    if !matches!(token.kind, TokenKind::Ellipsis) {
+        Err(ParseError::UnexpectedToken(*token))
+    } else {
+        let span = token.span;
+        let kind = ExprKind::Ellipsis;
         Ok((Expr { kind, span }, rest, span))
     }
 }

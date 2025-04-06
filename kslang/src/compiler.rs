@@ -1,10 +1,13 @@
+pub mod ast;
 pub mod lexer;
 
-mod ast;
+pub mod analyzer;
+
 mod clexer;
 mod parser;
 
-pub use parser::parse_stmt as parse_ast;
+pub use lexer::{CodeSpan, Source, SourceSequence};
+pub use parser::parse_ast;
 
 pub mod cextern {
     pub use super::clexer::*;

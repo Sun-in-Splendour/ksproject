@@ -1,10 +1,13 @@
-use super::lexer::{CodeSpan, Operator};
+use super::CodeSpan;
+use super::lexer::Operator;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum ExprKind {
     Ident,
+    Ellipsis,
     Lit(f64),
+
     Parented(Box<Expr>),
     Block(Vec<Stmt>),
 
@@ -43,14 +46,6 @@ pub enum ExprKind {
         if_then_span: CodeSpan,
         else_branch: Option<Box<ElseExpr>>,
     },
-    // For {
-    //     loop_var: Box<Expr>,
-    //     loop_range: Box<Expr>,
-    //     /// for i in 0..10 { loop_body }
-    //     /// ^^^^^^^^^^^^^^
-    //     head_span: CodeSpan,
-    //     loop_body: Box<Expr>,
-    // },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -101,6 +96,7 @@ pub enum StmtKind {
         body_span: CodeSpan,
     },
 
+    Empty,
     Expr(Expr),
 
     /// extern add(a, b);
@@ -110,6 +106,13 @@ pub enum StmtKind {
         /// extern add(a, b);
         ///           ^^^^^^
         args_span: CodeSpan,
+    },
+
+    For {
+        loop_var: Box<Expr>,
+        loop_iter: Box<Expr>,
+        head_span: CodeSpan,
+        loop_body: Box<Expr>,
     },
 
     Return(Expr),

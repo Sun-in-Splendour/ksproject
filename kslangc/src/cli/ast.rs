@@ -1,7 +1,7 @@
 use super::utils::*;
 use anyhow::Context;
 use clap::arg;
-use kslang::compiler::lexer::{CodeSpan, Lexer, Source, SourceSequence};
+use kslang::compiler::lexer::{Lexer, Source, SourceSequence};
 use std::{
     io::{BufWriter, Read, Write},
     path::PathBuf,
@@ -176,18 +176,14 @@ pub fn match_command(matches: &clap::ArgMatches, _verbose: bool) -> anyhow::Resu
     }
 
     let text = srcs.sources[0].text();
-    let span = CodeSpan::default();
-    let ctx = (text, &tokens[..], span);
 
-    let ast_ctx = match kslang::compiler::parse_ast(ctx) {
+    let ast = match kslang::compiler::parse_ast(text, &tokens) {
         Ok(ast_ctx) => ast_ctx,
         Err(e) => {
             writeln!(err, "[Parser] {:?}", e)?;
             anyhow::bail!("语法分析出现错误")
         }
     };
-
-    let (ast, rest, _) = ast_ctx;
 
     match format {
         Format::Json => {
@@ -197,11 +193,6 @@ pub fn match_command(matches: &clap::ArgMatches, _verbose: bool) -> anyhow::Resu
         Format::Html => unimplemented!(),
         Format::Debug => writeln!(out, "{:#?}", ast).context("写入输出失败")?,
         _ => unreachable!(),
-    }
-
-    if !rest.is_empty() && level.error() {
-        writeln!(err, "[Parser] 剩余未解析的符号: {:?}", rest).context("写入错误输出失败")?;
-        anyhow::bail!("语法分析出现错误")
     }
 
     Ok(())

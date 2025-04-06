@@ -79,6 +79,9 @@ pub enum TokenKind {
     #[token("!")]
     Not,
 
+    #[token("..")]
+    Range,
+
     // Punctuation ========================================================================
     #[token("(")]
     OpenParen,
@@ -92,6 +95,8 @@ pub enum TokenKind {
     Semicolon,
     #[token(",")]
     Comma,
+    #[token("...")]
+    Ellipsis,
 }
 
 impl TokenKind {
@@ -127,14 +132,16 @@ impl TokenKind {
             | TokenKind::Div
             | TokenKind::And
             | TokenKind::Or
-            | TokenKind::Not => "Operator",
+            | TokenKind::Not
+            | TokenKind::Range => "Operator",
 
             TokenKind::OpenParen
             | TokenKind::CloseParen
             | TokenKind::OpenBrace
             | TokenKind::CloseBrace
             | TokenKind::Semicolon
-            | TokenKind::Comma => "Punctuation",
+            | TokenKind::Comma
+            | TokenKind::Ellipsis => "Punctuation",
         }
     }
 
@@ -175,12 +182,15 @@ impl TokenKind {
             TokenKind::Or => Some("||"),
             TokenKind::Not => Some("!"),
 
+            TokenKind::Range => Some(".."),
+
             TokenKind::OpenParen => Some("("),
             TokenKind::CloseParen => Some(")"),
             TokenKind::OpenBrace => Some("{"),
             TokenKind::CloseBrace => Some("}"),
             TokenKind::Semicolon => Some(";"),
             TokenKind::Comma => Some(","),
+            TokenKind::Ellipsis => Some("..."),
         }
     }
 }
@@ -340,7 +350,9 @@ pub enum Operator {
     // Boolean Operators
     And,
     Or,
-    Not = TokenKind::Not as isize,
+    Not,
+
+    Range = TokenKind::Range as isize,
 }
 
 impl TryFrom<TokenKind> for Operator {
@@ -361,6 +373,7 @@ impl TryFrom<TokenKind> for Operator {
             TokenKind::And => Ok(Self::And),
             TokenKind::Or => Ok(Self::Or),
             TokenKind::Not => Ok(Self::Not),
+            TokenKind::Range => Ok(Self::Range),
             _ => Err(()),
         }
     }
@@ -383,6 +396,7 @@ impl Display for Operator {
             Self::And => f.write_str("&&"),
             Self::Or => f.write_str("||"),
             Self::Not => f.write_str("!"),
+            Self::Range => f.write_str(".."),
         }
     }
 }

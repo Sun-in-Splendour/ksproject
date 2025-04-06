@@ -1,4 +1,4 @@
-use super::lexer::Source;
+use super::Source;
 use std::{ffi::c_char, path::PathBuf};
 
 macro_rules! set {
